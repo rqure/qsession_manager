@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::info;
 use qlib_rs::app::ServiceState;
-use qlib_rs::{EntityType, FieldType, NotifyConfig, StoreProxy};
+use qlib_rs::{EntityType, FieldType, NotifyConfig, StoreProxy, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use ctrlc;
@@ -145,8 +145,73 @@ fn main() -> Result<()> {
                 let field = notification.current.field_path[0].clone();
 
                 if field == ft.request_login_user {
+                    let user_id = match &notification.current.value {
+                        Some(Value::EntityReference(Some(id))) => *id,
+                        _ => continue,
+                    };
+                    let sessions = store.find_entities(et.session, None).unwrap();
+                    for session in sessions {
+                        let (val, _, _) = store.read(session, &[ft.current_user]).unwrap();
+                        if val == Value::EntityReference(None) {
+                            let token = format!("token-{}", session.0);
+                            let now_ms = qlib_rs::now().unix_timestamp() * 1000;
+                            let expires_ms = now_ms + 3600000 * 1000;
+                            let now = qlib_rs::millis_to_timestamp(now_ms as u64);
+                            let expires = qlib_rs::millis_to_timestamp(expires_ms as u64);
+                            let mut pipeline = store.pipeline();
+                            pipeline.write(session, &[ft.current_user], Value::EntityReference(Some(user_id)), None, None, None, None).unwrap();
+                            pipeline.write(session, &[ft.token], Value::String(token), None, None, None, None).unwrap();
+                            pipeline.write(session, &[ft.expires_at], Value::Timestamp(expires), None, None, None, None).unwrap();
+                            pipeline.write(session, &[ft.created_at], Value::Timestamp(now), None, None, None, None).unwrap();
+                            pipeline.write(notification.current.entity_id, &[ft.response_login_user], Value::EntityReference(Some(user_id)), None, None, None, None).unwrap();
+                            pipeline.write(notification.current.entity_id, &[ft.response_login_session], Value::EntityReference(Some(session)), None, None, None, None).unwrap();
+                            pipeline.execute().unwrap();
+                            break;
+                        }
+                    }
                 } else if field == ft.request_logout_user {
+                    let user_id = match &notification.current.value {
+                        Some(Value::EntityReference(Some(id))) => *id,
+                        _ => continue,
+                    };
+                    let sessions = store.find_entities(et.session, None).unwrap();
+                    for session in sessions {
+                        let (val, _, _) = store.read(session, &[ft.current_user]).unwrap();
+                        if let Value::EntityReference(Some(id)) = val {
+                            if id == user_id {
+                                let mut pipeline = store.pipeline();
+                                pipeline.write(session, &[ft.previous_user], Value::EntityReference(Some(user_id)), None, None, None, None).unwrap();
+                                pipeline.write(session, &[ft.current_user], Value::EntityReference(None), None, None, None, None).unwrap();
+                                pipeline.write(session, &[ft.token], Value::String("".into()), None, None, None, None).unwrap();
+                                pipeline.write(notification.current.entity_id, &[ft.response_logout_user], Value::EntityReference(Some(user_id)), None, None, None, None).unwrap();
+                                pipeline.write(notification.current.entity_id, &[ft.response_logout_session], Value::EntityReference(Some(session)), None, None, None, None).unwrap();
+                                pipeline.execute().unwrap();
+                                break;
+                            }
+                        }
+                    }
                 } else if field == ft.request_refresh_user {
+                    let user_id = match &notification.current.value {
+                        Some(Value::EntityReference(Some(id))) => *id,
+                        _ => continue,
+                    };
+                    let sessions = store.find_entities(et.session, None).unwrap();
+                    for session in sessions {
+                        let (val, _, _) = store.read(session, &[ft.current_user]).unwrap();
+                        if let Value::EntityReference(Some(id)) = val {
+                            if id == user_id {
+                                let now_ms = qlib_rs::now().unix_timestamp() * 1000;
+                                let expires_ms = now_ms + 3600000 * 1000;
+                                let expires = qlib_rs::millis_to_timestamp(expires_ms as u64);
+                                let mut pipeline = store.pipeline();
+                                pipeline.write(session, &[ft.expires_at], Value::Timestamp(expires), None, None, None, None).unwrap();
+                                pipeline.write(notification.current.entity_id, &[ft.response_refresh_user], Value::EntityReference(Some(user_id)), None, None, None, None).unwrap();
+                                pipeline.write(notification.current.entity_id, &[ft.response_refresh_session], Value::EntityReference(Some(session)), None, None, None, None).unwrap();
+                                pipeline.execute().unwrap();
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
