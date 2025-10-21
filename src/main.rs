@@ -24,6 +24,11 @@ impl ET {
 
 struct FT {
     pub name: FieldType,
+    pub current_user: FieldType,
+    pub previous_user: FieldType,
+    pub token: FieldType,
+    pub expires_at: FieldType,
+    pub created_at: FieldType,
 
     pub request_login_user: FieldType,
     pub response_login_user: FieldType,
@@ -42,6 +47,12 @@ impl FT {
     pub fn new(store: &mut StoreProxy) -> Result<Self> {
         Ok(Self {
             name: store.get_field_type("Name")?,
+
+            current_user: store.get_field_type("CurrentUser")?,
+            previous_user: store.get_field_type("PreviousUser")?,
+            token: store.get_field_type("Token")?,
+            expires_at: store.get_field_type("ExpiresAt")?,
+            created_at: store.get_field_type("CreatedAt")?,
 
             request_login_user: store.get_field_type("RequestLoginUser")?,
             response_login_user: store.get_field_type("ResponseLoginUser")?,
