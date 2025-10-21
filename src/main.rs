@@ -1,6 +1,10 @@
 use anyhow::Result;
 use log::info;
-use qlib_rs::{EntityType, FieldType, StoreProxy};
+use qlib_rs::app::ServiceState;
+use qlib_rs::{EntityType, FieldType, NotifyConfig, StoreProxy};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use ctrlc;
 
 struct ET {
     pub user: EntityType,
@@ -84,9 +88,62 @@ fn main() -> Result<()> {
     let et = ET::new(&mut store)?;
     let ft = FT::new(&mut store)?;
 
-    loop {
-        
+    let mut app_state = ServiceState::new(
+        &mut store,
+        "qsession_manager".into(),
+        true,
+        1000)?;
+
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl-C handler");
+
+    let (notify_sender, notify_receiver) = crossbeam::channel::unbounded();
+
+    store.register_notification(NotifyConfig::EntityType {
+        entity_type: et.session_controller,
+        field_type: ft.request_login_user,
+        trigger_on_change: false,
+        context: vec![],
+    }, notify_sender.clone())?;
+
+    store.register_notification(NotifyConfig::EntityType {
+        entity_type: et.session_controller,
+        field_type: ft.request_logout_user,
+        trigger_on_change: false,
+        context: vec![],
+    }, notify_sender.clone())?;
+
+    store.register_notification(NotifyConfig::EntityType {
+        entity_type: et.session_controller,
+        field_type: ft.request_refresh_user,
+        trigger_on_change: false,
+        context: vec![],
+    }, notify_sender.clone())?;
+
+    app_state.make_me_available(&mut store)?;
+
+    while running.load(Ordering::SeqCst) {
+        store.process_notifications()?;
+        app_state.tick(&mut store)?;
+
+        while let Ok(notification) = notify_receiver.try_recv() {
+            if app_state.is_leader() {
+                let field = notification.current.field_path[0].clone();
+
+                if field == ft.request_login_user {
+                } else if field == ft.request_logout_user {
+                } else if field == ft.request_refresh_user {
+                }
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
+
+    app_state.make_me_unavailable(&mut store)?;
 
     Ok(())
 }
