@@ -85,6 +85,7 @@ fn main() -> Result<()> {
                 Ok(store) => {
                     info!("Connected to QCore at {}", addr);
                     s = Some(store);
+                    break;
                 }
                 Err(_e) => {
 
